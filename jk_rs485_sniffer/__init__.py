@@ -1,0 +1,74 @@
+# Updated : 2026.11.19
+# Version : 1.2.1
+# GitHub  : https://github.com/Sleeper85/esphome-jk-rs485-bms
+
+import esphome.codegen as cg
+import esphome.config_validation as cv
+from esphome.components import uart
+from esphome.const import CONF_ID
+from esphome import pins
+from esphome.core import CORE
+
+DEPENDENCIES = ["uart"]
+CODEOWNERS = ["@txubelaxu","@Sleeper85"]
+MULTI_CONF = True
+CONF_JK_RS485_SNIFFER_ID = "jk_rs485_sniffer_id"
+CONF_RX_TIMEOUT = "rx_timeout"
+CONF_TALK_PIN = "talk_pin"
+
+jk_rs485_sniffer_ns = cg.esphome_ns.namespace("jk_rs485_sniffer")
+
+try:
+    JkRS485Sniffer
+    JkRS485SnifferDevice
+except NameError:
+    JkRS485Sniffer = jk_rs485_sniffer_ns.class_("JkRS485Sniffer", cg.Component, uart.UARTDevice)
+    JkRS485SnifferDevice = jk_rs485_sniffer_ns.class_("JkRS485SnifferDevice")
+
+
+CONFIG_SCHEMA = (
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.declare_id(JkRS485Sniffer),
+            cv.Optional(CONF_TALK_PIN): pins.internal_gpio_output_pin_schema,
+            cv.Optional(
+                CONF_RX_TIMEOUT, default="50ms"
+            ): cv.positive_time_period_milliseconds,            
+        }
+    )
+    .extend(cv.COMPONENT_SCHEMA)
+    .extend(uart.UART_DEVICE_SCHEMA)
+)
+
+JK_RS485_SNIFFER_COMPONENT_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(CONF_JK_RS485_SNIFFER_ID): cv.use_id(JkRS485Sniffer),
+    }
+)
+
+
+async def to_code(config):
+    cg.add_global(jk_rs485_sniffer_ns.using)
+    var = cg.new_Pvariable(config[CONF_ID])
+    await cg.register_component(var, config)
+
+    await uart.register_uart_device(var, config)
+    cg.add(var.set_rx_timeout(config[CONF_RX_TIMEOUT]))
+
+    if CONF_TALK_PIN in config:
+       talk_pin = await cg.gpio_pin_expression(config[CONF_TALK_PIN])
+       cg.add(var.set_talk_pin(talk_pin))
+
+
+
+def jk_rs485_sniffer_device_schema():
+    schema = {
+        cv.GenerateID(CONF_JK_RS485_SNIFFER_ID): cv.use_id(JkRS485Sniffer),
+    }
+    return cv.Schema(schema)
+
+
+async def register_jk_rs485_bms_device(var, config):
+    parent = await cg.get_variable(config[CONF_JK_RS485_SNIFFER_ID])
+    cg.add(var.set_parent(parent))
+    cg.add(parent.register_device(var))
