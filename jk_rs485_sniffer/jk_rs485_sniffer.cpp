@@ -48,17 +48,17 @@ static const uint16_t JKPB_RS485_FRAME_TYPE_ADDRESS_FOR_FRAME_TYPE_x01 = 264;
 static const uint16_t JKPB_RS485_CHECKSUM_INDEX = 299;
 static const uint16_t JKPB_RS485_ADDRESS_OF_RS485_ADDRESS = 300;
 
-static const uint16_t MIN_SILENCE_MILLISECONDS = 150; // MIN TIME THAT MEANS THAT THERE IS A SILENCE
-static const uint16_t MIN_SILENCE_NEEDED_BEFORE_SPEAKING_MILLISECONDS = 250;
+static const uint16_t MIN_SILENCE_MILLISECONDS = 20; // MIN TIME THAT MEANS THAT THERE IS A SILENCE
+static const uint16_t MIN_SILENCE_NEEDED_BEFORE_SPEAKING_MILLISECONDS = 25;
 
-static const uint32_t TIME_BETWEEN_CELL_INFO_REQUESTS_MILLISECONDS       =  1000;
+static const uint32_t TIME_BETWEEN_CELL_INFO_REQUESTS_MILLISECONDS       =  900;
 static const uint32_t TIME_BETWEEN_DEVICE_SETTINGS_REQUESTS_MILLISECONDS = 10000; //5000
 static const uint32_t TIME_BETWEEN_DEVICE_INFO_REQUESTS_MILLISECONDS     = 3600000; //3600000
 
 static const uint16_t SILENCE_BEFORE_ACTING_AS_MASTER = 2000;
-static const uint16_t SILENCE_BEFORE_REUSING_NETWORK_ACTING_AS_MASTER=200;
-static const uint16_t TIME_BEFORE_NEXT_POOLING_MILLISENCONDS=300;
-static const uint16_t TIME_BETWEEN_CONSECUTIVE_REQUEST_SENDINGS_TO_SAME_SLAVE=1000;
+static const uint16_t SILENCE_BEFORE_REUSING_NETWORK_ACTING_AS_MASTER=50;
+static const uint16_t TIME_BEFORE_NEXT_POOLING_MILLISENCONDS=50;
+static const uint16_t TIME_BETWEEN_CONSECUTIVE_REQUEST_SENDINGS_TO_SAME_SLAVE=850;
 
 
 static const uint16_t TIME_BETWEEN_NETWORK_SCAN_MILLISECONDS=500;  // to improve
@@ -686,12 +686,12 @@ void JkRS485Sniffer::loop() {
 
       } else {
         //SPEAK WHEN A MASTER IS IN THE NETWORK
-        // Actively query available nodes (including 0x00 and 0x01) for cell info (frame_type=2)
-        // at ~1s cadence instead of waiting ~6s for the external master's full 0x01..0x0F sweep
+        // Actively query 0x00 and 0x01 for cell info (frame_type=2) during short silence windows
         bool cell_info_sent = false;
         if (now - this->last_jk_rs485_pooling_trial_ > TIME_BEFORE_NEXT_POOLING_MILLISENCONDS) {
-          for (uint8_t i = 0; i < 16; i++) {
-            const uint8_t addr = (this->pooling_index.node_address + i) % 16;
+          static const uint8_t priority_addrs[2] = {0x00, 0x01};
+          for (uint8_t idx = 0; idx < 2; idx++) {
+            const uint8_t addr = priority_addrs[(this->pooling_index.node_address + idx) % 2];
             const struct_rs485_network_node &node = this->rs485_network_node[addr];
             if (!node.available) continue;
             if (now - node.last_request_sent < TIME_BETWEEN_CONSECUTIVE_REQUEST_SENDINGS_TO_SAME_SLAVE) continue;
@@ -699,7 +699,7 @@ void JkRS485Sniffer::loop() {
                 now - node.last_cell_info_request_received_OK >= TIME_BETWEEN_CELL_INFO_REQUESTS_MILLISECONDS) {
               this->send_request_to_slave(addr, 2);
               this->last_jk_rs485_pooling_trial_ = now;
-              this->pooling_index.node_address = (addr + 1) % 16;
+              this->pooling_index.node_address = (addr + 1) % 2;
               cell_info_sent = true;
               break;
             }
