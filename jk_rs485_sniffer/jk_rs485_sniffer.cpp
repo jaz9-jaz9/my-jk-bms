@@ -185,13 +185,6 @@ void JkRS485Sniffer::handle_bms2sniffer_event(std::uint8_t slave_address, std::s
 
 void JkRS485Sniffer::handle_bms2sniffer_switch_or_number_uint32_event(std::uint8_t slave_address, std::uint8_t third_element_of_frame, std::uint16_t register_address, std::uint32_t value) {
 
-  // 02.10.10.78.00.02.04.00.00.00.00.37.A9
-  // 02.10.10.78.00.02.04.00.00.00.01.F6.69.
-
-  // 02.10.10.78.00.02.04.00.00.00.00.37.A9
-
-  // 02.10.10.00.00.02.04.00.00.0D.AC.35.C6 (13)
-
   // rs485_network_node[] has 16 slots (addresses 0x00 to 0x0F)
   if (slave_address > 15) {
     ESP_LOGE(TAG, "slave_address 0x%02X out of range (max 0x0F), ignoring", slave_address);
@@ -217,19 +210,10 @@ void JkRS485Sniffer::handle_bms2sniffer_switch_or_number_uint32_event(std::uint8
         }
     }
   }
-
-
-  
-
 }
 
 
 void JkRS485Sniffer::handle_bms2sniffer_switch_or_number_int32_event(std::uint8_t slave_address, std::uint8_t third_element_of_frame, std::uint16_t register_address, std::int32_t value) {
-
-  // 02.10.10.78.00.02.04.00.00.00.00.37.A9
-  // 02.10.10.78.00.02.04.00.00.00.01.F6.69.
-
-  // 02.10.10.78.00.02.04.00.00.00.00.37.A9
 
   // rs485_network_node[] has 16 slots (addresses 0x00 to 0x0F)
   if (slave_address > 15) {
@@ -248,10 +232,6 @@ void JkRS485Sniffer::handle_bms2sniffer_switch_or_number_int32_event(std::uint8_
         }
     }
   }
-
-
-  
-
 }
 
 void JkRS485Sniffer::handle_bms2sniffer_switch_or_number_uint16_event(std::uint8_t slave_address, std::uint8_t third_element_of_frame, std::uint16_t register_address, std::uint16_t value) {
@@ -275,10 +255,6 @@ void JkRS485Sniffer::handle_bms2sniffer_switch_or_number_uint16_event(std::uint8
         }
     }
   }
-
-
-  
-
 }
 
 // Sends a frame on the bus, driving the talk pin of the RS485 transceiver when there is one
@@ -338,12 +314,6 @@ void JkRS485Sniffer::send_command_switch_or_number_to_slave_uint32(std::uint8_t 
   uint8_t frame[13];
   uint8_t size=0;
 
-  //[0x0000, 0x10,   0x04,  3,  0],
-      // 02.10.10.78.00.02.04.00.00.00.00.37.A9
-      // 02.10.10.78.00.02.04.00.00.00.01.F6.69.
-      // 02.10.10.78.00.02.04.00.00.00.00.37.A9
-
-
   frame[0]  = slave_address ;                   // Slave Address
   frame[1]  = 0x10;                             // 
   frame[2]  = third_element_of_frame;           // 
@@ -369,8 +339,6 @@ void JkRS485Sniffer::send_command_switch_or_number_to_slave_uint32(std::uint8_t 
 void JkRS485Sniffer::send_command_switch_or_number_to_slave_uint16(std::uint8_t slave_address, std::uint8_t third_element_of_frame, std::uint16_t register_address, std::uint16_t value) {
   uint8_t frame[13];
   uint8_t size=0;
-
-  //02.10.11.14.00.01.   02.  02.10.   B0.19
 
   frame[0]  = slave_address ;                   // Slave Address
   frame[1]  = 0x10;                             // 
@@ -718,19 +686,41 @@ void JkRS485Sniffer::loop() {
 
       } else {
         //SPEAK WHEN A MASTER IS IN THE NETWORK
+        // Actively query available nodes (including 0x00 and 0x01) for cell info (frame_type=2)
+        // at ~1s cadence instead of waiting ~6s for the external master's full 0x01..0x0F sweep
+        bool cell_info_sent = false;
+        if (now - this->last_jk_rs485_pooling_trial_ > TIME_BEFORE_NEXT_POOLING_MILLISENCONDS) {
+          for (uint8_t i = 0; i < 16; i++) {
+            const uint8_t addr = (this->pooling_index.node_address + i) % 16;
+            const struct_rs485_network_node &node = this->rs485_network_node[addr];
+            if (!node.available) continue;
+            if (now - node.last_request_sent < TIME_BETWEEN_CONSECUTIVE_REQUEST_SENDINGS_TO_SAME_SLAVE) continue;
+            if (node.last_cell_info_request_received_OK == 0 ||
+                now - node.last_cell_info_request_received_OK >= TIME_BETWEEN_CELL_INFO_REQUESTS_MILLISECONDS) {
+              this->send_request_to_slave(addr, 2);
+              this->last_jk_rs485_pooling_trial_ = now;
+              this->pooling_index.node_address = (addr + 1) % 16;
+              cell_info_sent = true;
+              break;
+            }
+          }
+        }
+
         // The master never asks for the device info frame : request it from each slave that has
         // never sent it, then once an hour. The master itself (0x00) does not answer this request,
         // so the search starts at 0x01, and it rotates so that a silent slave cannot block the others
-        for (uint8_t i = 0; i < 15; i++) {
-          const uint8_t cont = 1 + (this->device_info_index_ + i) % 15;
-          const struct_rs485_network_node &node = this->rs485_network_node[cont];
-          if (!node.available) continue;
-          if (now - node.last_request_sent < TIME_BETWEEN_CONSECUTIVE_REQUEST_SENDINGS_TO_SAME_SLAVE) continue;
-          if (node.last_device_info_request_received_OK == 0 ||
-              now - node.last_device_info_request_received_OK > TIME_BETWEEN_DEVICE_INFO_REQUESTS_MILLISECONDS) {
-            this->send_request_to_slave(cont, 03);
-            this->device_info_index_ = cont;
-            break;
+        if (!cell_info_sent) {
+          for (uint8_t i = 0; i < 15; i++) {
+            const uint8_t cont = 1 + (this->device_info_index_ + i) % 15;
+            const struct_rs485_network_node &node = this->rs485_network_node[cont];
+            if (!node.available) continue;
+            if (now - node.last_request_sent < TIME_BETWEEN_CONSECUTIVE_REQUEST_SENDINGS_TO_SAME_SLAVE) continue;
+            if (node.last_device_info_request_received_OK == 0 ||
+                now - node.last_device_info_request_received_OK > TIME_BETWEEN_DEVICE_INFO_REQUESTS_MILLISECONDS) {
+              this->send_request_to_slave(cont, 03);
+              this->device_info_index_ = cont;
+              break;
+            }
           }
         }
 
