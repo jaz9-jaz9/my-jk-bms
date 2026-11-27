@@ -49,16 +49,16 @@ static const uint16_t JKPB_RS485_CHECKSUM_INDEX = 299;
 static const uint16_t JKPB_RS485_ADDRESS_OF_RS485_ADDRESS = 300;
 
 static const uint16_t MIN_SILENCE_MILLISECONDS = 20; // MIN TIME THAT MEANS THAT THERE IS A SILENCE
-static const uint16_t MIN_SILENCE_NEEDED_BEFORE_SPEAKING_MILLISECONDS = 25;
+static const uint16_t MIN_SILENCE_NEEDED_BEFORE_SPEAKING_MILLISECONDS = 45;
 
-static const uint32_t TIME_BETWEEN_CELL_INFO_REQUESTS_MILLISECONDS       =  900;
+static const uint32_t TIME_BETWEEN_CELL_INFO_REQUESTS_MILLISECONDS       =  950;
 static const uint32_t TIME_BETWEEN_DEVICE_SETTINGS_REQUESTS_MILLISECONDS = 10000; //5000
 static const uint32_t TIME_BETWEEN_DEVICE_INFO_REQUESTS_MILLISECONDS     = 3600000; //3600000
 
 static const uint16_t SILENCE_BEFORE_ACTING_AS_MASTER = 2000;
 static const uint16_t SILENCE_BEFORE_REUSING_NETWORK_ACTING_AS_MASTER=50;
-static const uint16_t TIME_BEFORE_NEXT_POOLING_MILLISENCONDS=50;
-static const uint16_t TIME_BETWEEN_CONSECUTIVE_REQUEST_SENDINGS_TO_SAME_SLAVE=850;
+static const uint16_t TIME_BEFORE_NEXT_POOLING_MILLISENCONDS=80;
+static const uint16_t TIME_BETWEEN_CONSECUTIVE_REQUEST_SENDINGS_TO_SAME_SLAVE=900;
 
 
 static const uint16_t TIME_BETWEEN_NETWORK_SCAN_MILLISECONDS=500;  // to improve
@@ -428,12 +428,6 @@ void JkRS485Sniffer::send_request_to_slave(uint8_t address, uint8_t frame_type)
     }
 
     ESP_LOGV(TAG, "MESSAGE REQUEST TO SEND>>: %s",hex_dump(frame, 11).c_str());
-
-    if (address == 0x00) {
-      ESP_LOGI(TAG, "PROBE TX -> 0x00 frame_type=%u avail=%u",
-               (unsigned) frame_type,
-               (unsigned) (address <= 15 ? this->rs485_network_node[address].available : 0));
-    }
     this->send_frame_(frame, sizeof(frame), address);
 }
 
@@ -692,23 +686,17 @@ void JkRS485Sniffer::loop() {
 
       } else {
         //SPEAK WHEN A MASTER IS IN THE NETWORK
-        // Actively query 0x00 and 0x01 for cell info (frame_type=2) during short silence windows
+        // Actively query slave 0x01 for cell info (frame_type=2) during bus silence windows
         bool cell_info_sent = false;
         if (now - this->last_jk_rs485_pooling_trial_ > TIME_BEFORE_NEXT_POOLING_MILLISENCONDS) {
-          static const uint8_t priority_addrs[2] = {0x00, 0x01};
-          for (uint8_t idx = 0; idx < 2; idx++) {
-            const uint8_t addr = priority_addrs[(this->pooling_index.node_address + idx) % 2];
-            const struct_rs485_network_node &node = this->rs485_network_node[addr];
-            if (!node.available) continue;
-            if (now - node.last_request_sent < TIME_BETWEEN_CONSECUTIVE_REQUEST_SENDINGS_TO_SAME_SLAVE) continue;
-            if (node.last_cell_info_request_received_OK == 0 ||
-                now - node.last_cell_info_request_received_OK >= TIME_BETWEEN_CELL_INFO_REQUESTS_MILLISECONDS) {
-              this->send_request_to_slave(addr, 2);
-              this->last_jk_rs485_pooling_trial_ = now;
-              this->pooling_index.node_address = (addr + 1) % 2;
-              cell_info_sent = true;
-              break;
-            }
+          const struct_rs485_network_node &slave_one = this->rs485_network_node[0x01];
+          if (slave_one.available &&
+              (now - slave_one.last_request_sent) >= TIME_BETWEEN_CONSECUTIVE_REQUEST_SENDINGS_TO_SAME_SLAVE &&
+              (slave_one.last_cell_info_request_received_OK == 0 ||
+               (now - slave_one.last_cell_info_request_received_OK) >= TIME_BETWEEN_CELL_INFO_REQUESTS_MILLISECONDS)) {
+            this->send_request_to_slave(0x01, 2);
+            this->last_jk_rs485_pooling_trial_ = now;
+            cell_info_sent = true;
           }
         }
 
