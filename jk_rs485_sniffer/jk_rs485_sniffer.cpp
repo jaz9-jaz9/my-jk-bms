@@ -428,6 +428,12 @@ void JkRS485Sniffer::send_request_to_slave(uint8_t address, uint8_t frame_type)
     }
 
     ESP_LOGV(TAG, "MESSAGE REQUEST TO SEND>>: %s",hex_dump(frame, 11).c_str());
+
+    if (address == 0x00) {
+      ESP_LOGI(TAG, "PROBE TX -> 0x00 frame_type=%u avail=%u",
+               (unsigned) frame_type,
+               (unsigned) (address <= 15 ? this->rs485_network_node[address].available : 0));
+    }
     this->send_frame_(frame, sizeof(frame), address);
 }
 
